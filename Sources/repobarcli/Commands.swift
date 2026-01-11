@@ -361,6 +361,9 @@ struct LoginCommand: CommanderRunnableCommand {
     @Option(name: .customLong("loopback-port"), help: "Loopback port for OAuth callback")
     var loopbackPort: Int?
 
+    @Option(name: .customLong("pkce"), help: "PKCE mode: auto (default), on, or off. Use 'off' for GHE < 3.15")
+    var pkce: String?
+
     static var commandDescription: CommandDescription {
         CommandDescription(
             commandName: commandName,
@@ -373,11 +376,22 @@ struct LoginCommand: CommanderRunnableCommand {
         self.clientID = try values.decodeOption("clientID")
         self.clientSecret = try values.decodeOption("clientSecret")
         self.loopbackPort = try values.decodeOption("loopbackPort")
+        self.pkce = try values.decodeOption("pkce")
     }
 
     mutating func run() async throws {
         if let loopbackPort, loopbackPort <= 0 || loopbackPort >= 65536 {
             throw ValidationError("--loopback-port must be between 1 and 65535")
+        }
+
+        let pkceMode: PKCEMode
+        if let pkce {
+            guard let mode = PKCEMode(rawValue: pkce.lowercased()) else {
+                throw ValidationError("--pkce must be 'auto', 'on', or 'off'")
+            }
+            pkceMode = mode
+        } else {
+            pkceMode = .auto
         }
 
         let store = SettingsStore()
@@ -396,10 +410,12 @@ struct LoginCommand: CommanderRunnableCommand {
             clientID: self.clientID ?? RepoBarAuthDefaults.clientID,
             clientSecret: self.clientSecret ?? RepoBarAuthDefaults.clientSecret,
             host: normalizedHost,
-            loopbackPort: loopbackPort ?? settings.loopbackPort
+            loopbackPort: loopbackPort ?? settings.loopbackPort,
+            pkceMode: pkceMode
         )
 
         settings.loopbackPort = loopbackPort ?? settings.loopbackPort
+        settings.pkceMode = pkceMode
         settings.githubHost = RepoBarAuthDefaults.githubHost
         if normalizedHost.host?.lowercased() == "github.com" {
             settings.enterpriseHost = nil

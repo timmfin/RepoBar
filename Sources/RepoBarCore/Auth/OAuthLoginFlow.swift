@@ -52,6 +52,7 @@ public struct OAuthLoginFlow {
         clientSecret: String,
         host: URL,
         loopbackPort: Int,
+        pkceMode: PKCEMode = .auto,
         scope: String = "repo read:org",
         timeout: TimeInterval = 180
     ) async throws -> OAuthTokens {
@@ -60,39 +61,51 @@ public struct OAuthLoginFlow {
         let authEndpoint = URL(string: "\(authBase)/login/oauth/authorize")!
         let tokenEndpoint = URL(string: "\(authBase)/login/oauth/access_token")!
 
-        let pkce = PKCE.generate()
+        let usePKCE = await Self.shouldUsePKCE(
+            mode: pkceMode,
+            host: normalizedHost,
+            dataProvider: self.dataProvider
+        )
+        let pkce = usePKCE ? PKCE.generate() : nil
         let state = self.stateProvider()
 
         let server = self.makeLoopbackServer(loopbackPort)
         let redirectURL = try server.start()
+        defer { server.stop() }
 
         var components = URLComponents(url: authEndpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: clientID),
             URLQueryItem(name: "redirect_uri", value: redirectURL.absoluteString),
             URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "scope", value: scope),
-            URLQueryItem(name: "code_challenge", value: pkce.challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256")
+            URLQueryItem(name: "scope", value: scope)
         ]
+        if let pkce {
+            components.queryItems?.append(URLQueryItem(name: "code_challenge", value: pkce.challenge))
+            components.queryItems?.append(URLQueryItem(name: "code_challenge_method", value: "S256"))
+        }
         guard let authorizeURL = components.url else { throw URLError(.badURL) }
         try self.openURL(authorizeURL)
 
         let result = try await server.waitForCallback(timeout: timeout)
         guard result.state == state else { throw URLError(.badServerResponse) }
 
-        var tokenRequest = URLRequest(url: tokenEndpoint)
-        tokenRequest.httpMethod = "POST"
-        tokenRequest.addValue("application/json", forHTTPHeaderField: "Accept")
-        tokenRequest.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        tokenRequest.httpBody = Self.formUrlEncoded([
+        var tokenParams = [
             "client_id": clientID,
             "client_secret": clientSecret,
             "code": result.code,
             "redirect_uri": redirectURL.absoluteString,
-            "grant_type": "authorization_code",
-            "code_verifier": pkce.verifier
-        ])
+            "grant_type": "authorization_code"
+        ]
+        if let pkce {
+            tokenParams["code_verifier"] = pkce.verifier
+        }
+
+        var tokenRequest = URLRequest(url: tokenEndpoint)
+        tokenRequest.httpMethod = "POST"
+        tokenRequest.addValue("application/json", forHTTPHeaderField: "Accept")
+        tokenRequest.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        tokenRequest.httpBody = Self.formUrlEncoded(tokenParams)
 
         let (data, response) = try await self.dataProvider(tokenRequest)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -104,8 +117,55 @@ public struct OAuthLoginFlow {
         )
         try self.tokenStore.save(tokens: tokens)
         try self.tokenStore.save(clientCredentials: OAuthClientCredentials(clientID: clientID, clientSecret: clientSecret))
-        server.stop()
         return tokens
+    }
+
+    /// Determines whether to use PKCE based on mode and host.
+    /// For "auto" mode, enables PKCE for GitHub.com and GHE >= 3.15, disables for older GHE.
+    /// See: https://docs.github.com/en/enterprise-server@3.12/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+    private static func shouldUsePKCE(
+        mode: PKCEMode,
+        host: URL,
+        dataProvider: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    ) async -> Bool {
+        switch mode {
+        case .on:
+            return true
+        case .off:
+            return false
+        case .auto:
+            let isGitHubCom = host.host?.lowercased() == "github.com"
+            if isGitHubCom {
+                return true
+            }
+            let gheVersion = await detectGHEVersion(host: host, dataProvider: dataProvider)
+            if let version = gheVersion {
+                return version >= GHEVersion(major: 3, minor: 15)
+            }
+            return false
+        }
+    }
+
+    /// Detects GitHub Enterprise Server version by checking X-GitHub-Enterprise-Version header.
+    private static func detectGHEVersion(
+        host: URL,
+        dataProvider: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    ) async -> GHEVersion? {
+        let apiURL = host.appendingPathComponent("api/v3")
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+
+        do {
+            let (_, response) = try await dataProvider(request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  let versionString = httpResponse.value(forHTTPHeaderField: "X-GitHub-Enterprise-Version") else {
+                return nil
+            }
+            return GHEVersion(string: versionString)
+        } catch {
+            return nil
+        }
     }
 
     public static func normalizeHost(_ host: URL) throws -> URL {
@@ -148,5 +208,32 @@ private struct TokenResponse: Decodable {
         case scope
         case expiresIn = "expires_in"
         case refreshToken = "refresh_token"
+    }
+}
+
+/// Represents a GitHub Enterprise Server version for comparison.
+struct GHEVersion: Comparable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+
+    init(major: Int, minor: Int, patch: Int = 0) {
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+    }
+
+    init?(string: String) {
+        let components = string.split(separator: ".").compactMap { Int($0) }
+        guard components.count >= 2 else { return nil }
+        self.major = components[0]
+        self.minor = components[1]
+        self.patch = components.count > 2 ? components[2] : 0
+    }
+
+    static func < (lhs: GHEVersion, rhs: GHEVersion) -> Bool {
+        if lhs.major != rhs.major { return lhs.major < rhs.major }
+        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
+        return lhs.patch < rhs.patch
     }
 }

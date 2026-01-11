@@ -15,8 +15,31 @@ public struct UserSettings: Equatable, Codable {
     public var githubHost: URL = .init(string: "https://github.com")!
     public var enterpriseHost: URL?
     public var loopbackPort: Int = 53682
+    public var pkceMode: PKCEMode = .auto
 
     public init() {}
+}
+
+public enum PKCEMode: String, CaseIterable, Equatable, Codable {
+    case auto
+    case on
+    case off
+
+    public var label: String {
+        switch self {
+        case .auto: "Auto (recommended)"
+        case .on: "Always on"
+        case .off: "Off (legacy GHE < 3.15)"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .auto: "Enables PKCE for GitHub.com and GHE 3.15+, disables for older GHE"
+        case .on: "Always use PKCE (may fail on older GitHub Enterprise)"
+        case .off: "Disable PKCE (less secure, for GHE < 3.15 compatibility)"
+        }
+    }
 }
 
 public struct HeatmapSettings: Equatable, Codable {

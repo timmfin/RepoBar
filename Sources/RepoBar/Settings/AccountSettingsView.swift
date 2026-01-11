@@ -93,6 +93,23 @@ struct AccountSettingsView: View {
                                 .frame(minWidth: self.enterpriseFieldMinWidth)
                                 .layoutPriority(1)
                         }
+                        LabeledContent("PKCE") {
+                            Picker("", selection: self.$session.settings.pkceMode) {
+                                ForEach(PKCEMode.allCases, id: \.self) { mode in
+                                    Text(mode.label).tag(mode)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(minWidth: self.enterpriseFieldMinWidth)
+                        }
+                        Text(self.session.settings.pkceMode.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if self.session.settings.pkceMode == .off {
+                            Text("Warning: Disabling PKCE reduces security. Only use for GHE < 3.15 compatibility.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                         Text("Create an OAuth App in your enterprise server. Callback URL: http://127.0.0.1:53682/callback")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -197,7 +214,8 @@ struct AccountSettingsView: View {
                     clientID: effectiveClientID,
                     clientSecret: effectiveClientSecret,
                     host: self.session.settings.enterpriseHost ?? self.session.settings.githubHost,
-                    loopbackPort: self.session.settings.loopbackPort
+                    loopbackPort: self.session.settings.loopbackPort,
+                    pkceMode: self.session.settings.pkceMode
                 )
                 self.session.hasStoredTokens = true
                 if let user = try? await appState.github.currentUser() {
