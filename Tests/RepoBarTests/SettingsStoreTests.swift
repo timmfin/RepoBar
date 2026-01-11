@@ -39,4 +39,24 @@ struct SettingsStoreTests {
         #expect(loaded.localProjects.rootPath == "~/Projects")
         #expect(loaded.localProjects.rootBookmarkData == Data([0x01, 0x02, 0x03, 0x04]))
     }
+
+    @Test
+    func saveAndLoad_persistsPKCEMode() throws {
+        let suiteName = "repobar.settings.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = SettingsStore(defaults: defaults)
+
+        var settings = UserSettings()
+        #expect(settings.pkceMode == .auto)
+
+        settings.pkceMode = .off
+        store.save(settings)
+        #expect(store.load().pkceMode == .off)
+
+        settings.pkceMode = .on
+        store.save(settings)
+        #expect(store.load().pkceMode == .on)
+    }
 }
