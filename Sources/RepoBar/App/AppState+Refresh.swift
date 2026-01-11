@@ -60,9 +60,19 @@ extension AppState {
                     await MainActor.run { self.session.account = .loggedIn(user) }
                 }
             }
-            let repos = try await self.fetchActivityRepos()
+            let fetchResult = try await self.fetchActivityRepos()
             try Task.checkCancellation()
-            let visible = self.applyVisibilityFilters(to: repos)
+
+            // Auto-suggest pinned-only mode for enterprise accounts with many repos
+            if fetchResult.hasMoreRepos,
+               !self.session.settings.repoList.enterpriseModePromptShown,
+               self.session.settings.repoList.fetchMode == .standard {
+                await MainActor.run {
+                    self.session.shouldShowEnterpriseModePrompt = true
+                }
+            }
+
+            let visible = self.applyVisibilityFilters(to: fetchResult.repositories)
             let ordered = self.applyPinnedOrder(to: visible)
             let matchNames = self.localMatchRepoNamesForLocalProjects(repos: ordered, includePinned: true)
             let localSnapshotTask = Task {

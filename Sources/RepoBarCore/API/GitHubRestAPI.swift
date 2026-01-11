@@ -39,6 +39,25 @@ struct GitHubRestAPI: Sendable {
         )
     }
 
+    /// Fetches first page of repos (up to 100) and returns whether more pages exist.
+    /// Returns: (repos, hasMorePages, estimatedTotal)
+    func userReposFirstPage() async throws -> ([RepoItem], Bool, Int?) {
+        let token = try await tokenProvider()
+        let baseURL = await apiHost()
+        var components = URLComponents(url: baseURL.appending(path: "/user/repos"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "per_page", value: "100")] + Self.userReposQueryItems()
+        let (data, response) = try await authorizedGet(url: components.url!, token: token)
+        let repos = try GitHubDecoding.decode([RepoItem].self, from: data)
+
+        // Check Link header for pagination info
+        let linkHeader = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Link") ?? ""
+        let lastPage = GitHubPagination.lastPage(from: linkHeader)
+        let hasMore = linkHeader.contains("rel=\"next\"")
+        let estimatedTotal = lastPage.map { $0 * 100 } // Rough estimate
+
+        return (repos, hasMore, estimatedTotal)
+    }
+
     func fetchCurrentUser() async throws -> CurrentUser {
         let token = try await tokenProvider()
         let baseURL = await self.apiHost()

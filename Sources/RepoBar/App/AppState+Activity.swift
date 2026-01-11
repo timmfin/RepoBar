@@ -2,8 +2,10 @@ import Foundation
 import RepoBarCore
 
 extension AppState {
-    func fetchActivityRepos() async throws -> [Repository] {
-        try await self.github.activityRepositories(limit: nil)
+    func fetchActivityRepos() async throws -> GitHubClient.FetchReposResult {
+        let mode = self.session.settings.repoList.fetchMode
+        let pinnedNames = self.session.settings.repoList.pinnedRepositories
+        return try await self.github.activityRepositories(mode: mode, pinnedRepoNames: pinnedNames)
     }
 
     func fetchGlobalActivityEvents(

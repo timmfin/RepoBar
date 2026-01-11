@@ -60,6 +60,7 @@ struct OAuthLoginFlowTests {
             clientSecret: "csecret",
             host: host,
             loopbackPort: 12345,
+            pkceMode: .on,
             timeout: 2
         )
         #expect(tokens.accessToken == "tok")

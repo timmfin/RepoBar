@@ -96,6 +96,70 @@ public actor GitHubClient {
         }
     }
 
+    /// Result of fetching repos with mode, includes whether more repos exist
+    public struct FetchReposResult: Sendable {
+        public let repositories: [Repository]
+        public let hasMoreRepos: Bool
+        public let totalEstimate: Int?
+    }
+
+    /// Fetch repositories based on fetch mode, with info about whether more exist
+    public func activityRepositories(
+        mode: RepoFetchMode,
+        pinnedRepoNames: [String]
+    ) async throws -> FetchReposResult {
+        switch mode {
+        case .pinnedOnly:
+            let repos = try await self.fetchPinnedRepositories(names: pinnedRepoNames)
+            return FetchReposResult(repositories: repos, hasMoreRepos: false, totalEstimate: repos.count)
+
+        case .standard:
+            let (items, hasMore, total) = try await self.restAPI.userReposFirstPage()
+            await self.repoDetailCoordinator.updateDiscussionsCapability(
+                from: items,
+                source: "activityRepositories.standard"
+            )
+            let activityResults = await self.fetchActivityResults(for: items)
+            let repos = items.map { item in
+                let fullName = "\(item.owner.login)/\(item.name)"
+                let result = activityResults[fullName] ?? ActivityFetchResult(
+                    pulls: .failure(URLError(.unknown)),
+                    activity: .failure(URLError(.unknown))
+                )
+                return self.activityRepository(
+                    from: item,
+                    openPullsResult: result.pulls,
+                    activityResult: result.activity
+                )
+            }
+            return FetchReposResult(repositories: repos, hasMoreRepos: hasMore, totalEstimate: total)
+
+        case .unlimited:
+            let repos = try await self.activityRepositories(limit: nil)
+            return FetchReposResult(repositories: repos, hasMoreRepos: false, totalEstimate: repos.count)
+        }
+    }
+
+    /// Fetch specific repos by full name (owner/name)
+    public func fetchPinnedRepositories(names: [String]) async throws -> [Repository] {
+        try await withThrowingTaskGroup(of: Repository?.self) { group in
+            for fullName in names {
+                let parts = fullName.split(separator: "/")
+                guard parts.count == 2 else { continue }
+                let owner = String(parts[0])
+                let name = String(parts[1])
+                group.addTask {
+                    try? await self.fullRepository(owner: owner, name: name)
+                }
+            }
+            var repos: [Repository] = []
+            for try await repo in group {
+                if let repo { repos.append(repo) }
+            }
+            return repos
+        }
+    }
+
     public func userActivityEvents(
         username: String,
         scope: GlobalActivityScope,

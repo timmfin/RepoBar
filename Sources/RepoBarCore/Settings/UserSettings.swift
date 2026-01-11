@@ -57,8 +57,40 @@ public struct RepoListSettings: Equatable, Codable {
     public var pinnedRepositories: [String] = [] // owner/name
     public var hiddenRepositories: [String] = [] // owner/name
     public var ownerFilter: [String] = [] // owner names to include (empty = show all)
+    public var fetchMode: RepoFetchMode = .standard
+    public var enterpriseModePromptShown: Bool = false
 
     public init() {}
+}
+
+public enum RepoFetchMode: String, CaseIterable, Equatable, Codable, Sendable {
+    case standard       // Fetch up to ~100 repos (first page), suitable for most users
+    case pinnedOnly     // Only fetch pinned repos (fastest, for enterprise)
+    case unlimited      // Fetch all accessible repos (original behavior, can be slow)
+
+    public var label: String {
+        switch self {
+        case .standard: "Standard (up to 100 repos)"
+        case .pinnedOnly: "Pinned only (fastest)"
+        case .unlimited: "All accessible repos (slow for enterprise)"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .standard: "Fetches up to 100 most recently active repos. Good balance of speed and coverage."
+        case .pinnedOnly: "Only fetches repos you've pinned. Fastest option for enterprise accounts with many repos."
+        case .unlimited: "Fetches all repos you have access to. Can be very slow for enterprise accounts."
+        }
+    }
+
+    public var fetchLimit: Int? {
+        switch self {
+        case .standard: 100
+        case .pinnedOnly: nil // Special handling - only fetch pinned
+        case .unlimited: nil
+        }
+    }
 }
 
 public struct AppearanceSettings: Equatable, Codable {

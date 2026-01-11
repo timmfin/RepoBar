@@ -32,6 +32,7 @@ final class Session {
     var localDiscoveredRepoCount = 0
     var localProjectsScanInProgress = false
     var localProjectsAccessDenied = false
+    var shouldShowEnterpriseModePrompt = false
 }
 
 enum AccountState: Equatable {

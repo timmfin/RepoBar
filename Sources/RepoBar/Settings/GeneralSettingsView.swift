@@ -101,10 +101,19 @@ struct GeneralSettingsView: View {
                         set: { self.toggleShowOnlyMyRepos($0) }
                     ))
                     .disabled(self.normalizedCurrentUsername == nil)
+                    Picker("Fetch mode", selection: self.$session.settings.repoList.fetchMode) {
+                        ForEach(RepoFetchMode.allCases, id: \.self) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .onChange(of: self.session.settings.repoList.fetchMode) { _, _ in
+                        self.appState.persistSettings()
+                        self.appState.requestRefresh(cancelInFlight: true)
+                    }
                 } header: {
                     Text("Repositories")
                 } footer: {
-                    Text("Filters apply to repo lists and search. 'Show only my repositories' hides repos owned by organizations and other users.")
+                    Text("Filters apply to repo lists and search. For enterprise accounts with many repos, use 'Pinned only' for faster performance.")
                 }
             }
             .formStyle(.grouped)
