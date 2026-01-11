@@ -55,8 +55,8 @@ struct RepoBarRoot: ParsableCommand {
 struct ReposCommand: CommanderRunnableCommand {
     nonisolated static let commandName = "repos"
 
-    @Option(name: .customLong("limit"), help: "Max repositories to fetch (default: all accessible)")
-    var limit: Int?
+    @Option(name: .customLong("limit"), help: "Max repositories to fetch (default: 25, use 0 for all)")
+    var limit: Int = 25
 
     @Option(name: .customLong("age"), help: "Max age in days for repo activity (default: 365)")
     var age: Int = RepositoryQueryDefaults.defaultAgeDays
@@ -108,7 +108,7 @@ struct ReposCommand: CommanderRunnableCommand {
 
     mutating func bind(_ values: ParsedValues) throws {
         self.output.bind(values)
-        self.limit = try values.decodeOption("limit")
+        self.limit = try values.decodeOption("limit") ?? 25
         self.age = try values.decodeOption("age") ?? 365
         self.sort = try values.decodeOption("sort") ?? .activity
         self.includeRelease = values.flag("includeRelease")
@@ -128,8 +128,8 @@ struct ReposCommand: CommanderRunnableCommand {
     }
 
     mutating func run() async throws {
-        if let limit, limit <= 0 {
-            throw ValidationError("--limit must be greater than 0")
+        if limit < 0 {
+            throw ValidationError("--limit must be 0 or greater (0 = all repos)")
         }
         if self.age <= 0 {
             throw ValidationError("--age must be greater than 0")
@@ -238,7 +238,7 @@ struct ReposCommand: CommanderRunnableCommand {
             break
         }
 
-        let repos = try await client.activityRepositories(limit: limit)
+        let repos = try await client.activityRepositories(limit: limit == 0 ? nil : limit)
         let ownerFiltered = ownerFilter?.applying(to: repos) ?? repos
         let filteredRepos = RepositoryPipeline.apply(ownerFiltered, query: query)
         try await self.renderResults(
